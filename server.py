@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""
+NocoDB MCP Server
+
+A Model Context Protocol server that provides access to NocoDB API functionality.
+Supports both stdio and SSE transport methods.
+"""
+
+import os
+import json
+import asyncio
+from typing import Any, Dict, List, Optional, Union
+from dotenv import load_dotenv
+import httpx
+from fastmcp import FastMCP
+
+# Load environment variables
+load_dotenv()
+
+# Configuration
+NOCODB_HOST = os.getenv("NOCODB_HOST", "")
+NOCODB_TOKEN = os.getenv("NOCODB_TOKEN", "")
+MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
+
+if not NOCODB_HOST or not NOCODB_TOKEN:
+    raise ValueError("NOCODB_HOST and NOCODB_TOKEN must be set in environment variables")
+
+# Initialize FastMCP
+mcp = FastMCP("NocoDB MCP Server")
+
+class NocoDBClient:
+    """NocoDB API client wrapper"""
+    
+    def __init__(self, host: str, token: str):
+        self.host = host.rstrip('/')
+        self.token = token
+        self.headers = {
+            "xc-token": token,
+            "Content-Type": "application/json"
+        }
+    
+    async def create_records(self, table_id: str, records: Union[Dict, List[Dict]]) -> Dict[str, Any]:
+        """Create new records in a table"""
+        url = f"{self.host}/api/v2/tables/{table_id}/records"
+        
+        # Ensure records is a list
+        if isinstance(records, dict):
+            records = [records]
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers=self.headers,
+                json=records,
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "data": response.json(),
+                    "message": f"Successfully created {len(records)} record(s)"
+                }
+            else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"msg": response.text}
+                return {
+                    "success": False,
+                    "error": error_data,
+                    "status_code": response.status_code
+                }
+    
+    async def get_records(self, table_id: str, limit: int = 25, offset: int = 0) -> Dict[str, Any]:
+        """Get records from a table"""
+        url = f"{self.host}/api/v2/tables/{table_id}/records"
+        params = {
+            "limit": limit,
+            "offset": offset
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers=self.headers,
+                params=params,
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "data": response.json(),
+                    "message": f"Successfully retrieved records from table {table_id}"
+                }
+            else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"msg": response.text}
+                return {
+                    "success": False,
+                    "error": error_data,
+                    "status_code": response.status_code
+                }
+    
+    async def update_record(self, table_id: str, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a specific record"""
+        url = f"{self.host}/api/v2/tables/{table_id}/records/{record_id}"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                url,
+                headers=self.headers,
+                json=data,
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "data": response.json(),
+                    "message": f"Successfully updated record {record_id}"
+                }
+            else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"msg": response.text}
+                return {
+                    "success": False,
+                    "error": error_data,
+                    "status_code": response.status_code
+                }
+    
+    async def delete_record(self, table_id: str, record_id: str) -> Dict[str, Any]:
+        """Delete a specific record"""
+        url = f"{self.host}/api/v2/tables/{table_id}/records/{record_id}"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                url,
+                headers=self.headers,
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "message": f"Successfully deleted record {record_id}"
+                }
+            else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"msg": response.text}
+                return {
+                    "success": False,
+                    "error": error_data,
+                    "status_code": response.status_code
+                }
+
+# Initialize NocoDB client
+nocodb_client = NocoDBClient(NOCODB_HOST, NOCODB_TOKEN)
+
+@mcp.tool()
+async def create_table_records(
+    table_id: str,
+    records: Union[Dict[str, Any], List[Dict[str, Any]]]
+) -> Dict[str, Any]:
+    """
+    Create new records in a NocoDB table.
+    
+    Args:
+        table_id: The ID of the table to create records in
+        records: A single record object or array of record objects to create
+    
+    Returns:
+        Dictionary containing success status, created record IDs, and any error messages
+    """
+    try:
+        result = await nocodb_client.create_records(table_id, records)
+        return result
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to create records due to an unexpected error"
+        }
+
+@mcp.tool()
+async def get_table_records(
+    table_id: str,
+    limit: int = 25,
+    offset: int = 0
+) -> Dict[str, Any]:
+    """
+    Retrieve records from a NocoDB table.
+    
+    Args:
+        table_id: The ID of the table to retrieve records from
+        limit: Maximum number of records to retrieve (default: 25)
+        offset: Number of records to skip (default: 0)
+    
+    Returns:
+        Dictionary containing success status, retrieved records, and any error messages
+    """
+    try:
+        result = await nocodb_client.get_records(table_id, limit, offset)
+        return result
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to retrieve records due to an unexpected error"
+        }
+
+@mcp.tool()
+async def update_table_record(
+    table_id: str,
+    record_id: str,
+    data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Update a specific record in a NocoDB table.
+    
+    Args:
+        table_id: The ID of the table containing the record
+        record_id: The ID of the record to update
+        data: Dictionary containing the fields to update
+    
+    Returns:
+        Dictionary containing success status, updated record data, and any error messages
+    """
+    try:
+        result = await nocodb_client.update_record(table_id, record_id, data)
+        return result
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to update record due to an unexpected error"
+        }
+
+@mcp.tool()
+async def delete_table_record(
+    table_id: str,
+    record_id: str
+) -> Dict[str, Any]:
+    """
+    Delete a specific record from a NocoDB table.
+    
+    Args:
+        table_id: The ID of the table containing the record
+        record_id: The ID of the record to delete
+    
+    Returns:
+        Dictionary containing success status and any error messages
+    """
+    try:
+        result = await nocodb_client.delete_record(table_id, record_id)
+        return result
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to delete record due to an unexpected error"
+        }
+
+@mcp.tool()
+async def get_server_info() -> Dict[str, Any]:
+    """
+    Get information about the NocoDB MCP server configuration.
+    
+    Returns:
+        Dictionary containing server configuration information
+    """
+    return {
+        "server_name": "NocoDB MCP Server",
+        "nocodb_host": NOCODB_HOST,
+        "mcp_port": MCP_PORT,
+        "available_tools": [
+            "create_table_records",
+            "get_table_records", 
+            "update_table_record",
+            "delete_table_record",
+            "get_server_info"
+        ]
+    }
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "--sse":
+        # SSE mode
+        print(f"Starting NocoDB MCP Server in SSE mode on port {MCP_PORT}", file=sys.stderr)
+        mcp.run(transport="sse", port=MCP_PORT)
+    else:
+        # stdio mode (default)
+        print("Starting NocoDB MCP Server in stdio mode", file=sys.stderr)
+        mcp.run()
