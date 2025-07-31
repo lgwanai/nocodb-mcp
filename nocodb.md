@@ -118,3 +118,6 @@ or 400
   "msg": "BadRequest [Error]: <ERROR MESSAGE>"
 }
 ```
+
+
+https://app.nocodb.com/api/v2/tables/{tableId}/records

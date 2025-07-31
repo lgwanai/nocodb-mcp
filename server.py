@@ -99,15 +99,19 @@ class NocoDBClient:
                     "status_code": response.status_code
                 }
     
-    async def update_record(self, table_id: str, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update a specific record"""
-        url = f"{self.host}/api/v2/tables/{table_id}/records/{record_id}"
+    async def update_records(self, table_id: str, records: Union[Dict, List[Dict]]) -> Dict[str, Any]:
+        """Update records in a table (batch update)"""
+        url = f"{self.host}/api/v2/tables/{table_id}/records"
+        
+        # Ensure records is a list
+        if isinstance(records, dict):
+            records = [records]
         
         async with httpx.AsyncClient() as client:
             response = await client.patch(
                 url,
                 headers=self.headers,
-                json=data,
+                json=records,
                 timeout=30.0
             )
             
@@ -115,7 +119,7 @@ class NocoDBClient:
                 return {
                     "success": True,
                     "data": response.json(),
-                    "message": f"Successfully updated record {record_id}"
+                    "message": f"Successfully updated {len(records)} record(s)"
                 }
             else:
                 error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"msg": response.text}
@@ -155,20 +159,43 @@ nocodb_client = NocoDBClient(NOCODB_HOST, NOCODB_TOKEN)
 @mcp.tool()
 async def create_table_records(
     table_id: str,
-    records: Union[Dict[str, Any], List[Dict[str, Any]]]
+    records: Union[Dict[str, Any], List[Dict[str, Any]], str]
 ) -> Dict[str, Any]:
     """
     Create new records in a NocoDB table.
     
     Args:
         table_id: The ID of the table to create records in
-        records: A single record object or array of record objects to create
+        records: A single record object, array of record objects, or JSON string to create
     
     Returns:
         Dictionary containing success status, created record IDs, and any error messages
     """
     try:
-        result = await nocodb_client.create_records(table_id, records)
+        # 处理records参数的保护逻辑
+        processed_records = records
+        
+        # 如果records是字符串，尝试解析为JSON
+        if isinstance(records, str):
+            try:
+                import json
+                processed_records = json.loads(records)
+            except json.JSONDecodeError as json_error:
+                return {
+                    "success": False,
+                    "error": f"Invalid JSON string: {str(json_error)}",
+                    "message": "Failed to parse records JSON string"
+                }
+        
+        # 验证解析后的数据类型
+        if not isinstance(processed_records, (dict, list)):
+            return {
+                "success": False,
+                "error": "Records must be a dictionary, list, or valid JSON string",
+                "message": "Invalid records data type"
+            }
+        
+        result = await nocodb_client.create_records(table_id, processed_records)
         return result
     except Exception as e:
         return {
@@ -205,30 +232,61 @@ async def get_table_records(
         }
 
 @mcp.tool()
-async def update_table_record(
+async def update_table_records(
     table_id: str,
-    record_id: str,
-    data: Dict[str, Any]
+    records: Union[Dict[str, Any], List[Dict[str, Any]], str]
 ) -> Dict[str, Any]:
     """
-    Update a specific record in a NocoDB table.
+    Update records in a NocoDB table (batch update).
     
     Args:
-        table_id: The ID of the table containing the record
-        record_id: The ID of the record to update
-        data: Dictionary containing the fields to update
+        table_id: The ID of the table containing the records
+        records: A single record object (must include id), array of record objects, or JSON string
     
     Returns:
         Dictionary containing success status, updated record data, and any error messages
     """
     try:
-        result = await nocodb_client.update_record(table_id, record_id, data)
+        # 处理records参数的保护逻辑
+        processed_records = records
+        
+        # 如果records是字符串，尝试解析为JSON
+        if isinstance(records, str):
+            try:
+                import json
+                processed_records = json.loads(records)
+            except json.JSONDecodeError as json_error:
+                return {
+                    "success": False,
+                    "error": f"Invalid JSON string: {str(json_error)}",
+                    "message": "Failed to parse records JSON string"
+                }
+        
+        # 验证解析后的数据类型
+        if not isinstance(processed_records, (dict, list)):
+            return {
+                "success": False,
+                "error": "Records must be a dictionary, list, or valid JSON string",
+                "message": "Invalid records data type"
+            }
+        
+        # 验证记录必须包含id字段
+        records_to_check = processed_records if isinstance(processed_records, list) else [processed_records]
+        for record in records_to_check:
+            if not isinstance(record, dict) or 'id' not in record:
+                return {
+                    "success": False,
+                    "error": "Each record must be a dictionary containing an 'id' field",
+                    "message": "Invalid record format - missing id field"
+                }
+        
+        result = await nocodb_client.update_records(table_id, processed_records)
         return result
     except Exception as e:
         return {
             "success": False,
             "error": str(e),
-            "message": "Failed to update record due to an unexpected error"
+            "message": "Failed to update records due to an unexpected error"
         }
 
 @mcp.tool()
@@ -271,7 +329,7 @@ async def get_server_info() -> Dict[str, Any]:
         "available_tools": [
             "create_table_records",
             "get_table_records", 
-            "update_table_record",
+            "update_table_records",
             "delete_table_record",
             "get_server_info"
         ]
