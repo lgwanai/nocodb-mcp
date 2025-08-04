@@ -38,6 +38,11 @@ class NocoDBClient:
             "xc-token": token,
             "Content-Type": "application/json"
         }
+        # Configure proxy settings - disable proxy to avoid SOCKS issues
+        self.client_config = {
+            "timeout": 30.0,
+            "proxies": None  # Explicitly disable proxy
+        }
     
     async def create_records(self, table_id: str, records: Union[Dict, List[Dict]]) -> Dict[str, Any]:
         """Create new records in a table"""
@@ -47,12 +52,11 @@ class NocoDBClient:
         if isinstance(records, dict):
             records = [records]
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(**self.client_config) as client:
             response = await client.post(
                 url,
                 headers=self.headers,
-                json=records,
-                timeout=30.0
+                json=records
             )
             
             if response.status_code == 200:
@@ -77,12 +81,11 @@ class NocoDBClient:
             "offset": offset
         }
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(**self.client_config) as client:
             response = await client.get(
                 url,
                 headers=self.headers,
-                params=params,
-                timeout=30.0
+                params=params
             )
             
             if response.status_code == 200:
@@ -107,12 +110,11 @@ class NocoDBClient:
         if isinstance(records, dict):
             records = [records]
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(**self.client_config) as client:
             response = await client.patch(
                 url,
                 headers=self.headers,
-                json=records,
-                timeout=30.0
+                json=records
             )
             
             if response.status_code == 200:
@@ -133,11 +135,10 @@ class NocoDBClient:
         """Delete a specific record"""
         url = f"{self.host}/api/v2/tables/{table_id}/records/{record_id}"
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(**self.client_config) as client:
             response = await client.delete(
                 url,
-                headers=self.headers,
-                timeout=30.0
+                headers=self.headers
             )
             
             if response.status_code == 200:
