@@ -1,4 +1,12 @@
-# 环境变量配置文件
+# 忽略隐藏文件（dotfiles），例如 .env、.DS_Store、.vscode 等
+.*
+# 但保留本文件本身
+!.gitignore
+
+# 忽略日志文件
+*.log
+nocodb-mcp.log
+logs/
 .env
 
 # Python 缓存文件
@@ -64,3 +72,5 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.env
+nocodb-mcp.log

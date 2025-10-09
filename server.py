@@ -9,6 +9,7 @@ Supports both stdio and SSE transport methods.
 import os
 import json
 import asyncio
+import copy
 from typing import Any, Dict, List, Optional, Union
 from dotenv import load_dotenv
 import httpx
@@ -24,6 +25,39 @@ MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
 
 if not NOCODB_HOST or not NOCODB_TOKEN:
     raise ValueError("NOCODB_HOST and NOCODB_TOKEN must be set in environment variables")
+
+# 只读字段列表 - 这些字段在更新时需要被过滤掉
+READONLY_FIELDS = {
+    'CreatedAt', 'UpdatedAt', 'Created By', 'Updated By',
+    'createdAt', 'updatedAt', 'created_by', 'updated_by',
+    'nc_created_at', 'nc_updated_at', 'nc_created_by', 'nc_updated_by'
+}
+
+def filter_readonly_fields(records: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    过滤掉只读字段，防止更新时出错
+    
+    Args:
+        records: 单个记录字典或记录列表
+        
+    Returns:
+        过滤后的记录
+    """
+    def filter_single_record(record: Dict[str, Any]) -> Dict[str, Any]:
+        # 深拷贝记录以避免修改原始数据
+        filtered_record = copy.deepcopy(record)
+        
+        # 删除只读字段
+        for field in READONLY_FIELDS:
+            if field in filtered_record:
+                del filtered_record[field]
+                
+        return filtered_record
+    
+    if isinstance(records, list):
+        return [filter_single_record(record) for record in records]
+    else:
+        return filter_single_record(records)
 
 # Initialize FastMCP
 mcp = FastMCP("NocoDB MCP Server")
@@ -270,17 +304,20 @@ async def update_table_records(
                 "message": "Invalid records data type"
             }
         
-        # 验证记录必须包含id字段
+        # 验证记录必须包含id字段（支持'id'或'Id'）
         records_to_check = processed_records if isinstance(processed_records, list) else [processed_records]
         for record in records_to_check:
-            if not isinstance(record, dict) or 'id' not in record:
+            if not isinstance(record, dict) or ('id' not in record and 'Id' not in record):
                 return {
                     "success": False,
-                    "error": "Each record must be a dictionary containing an 'id' field",
-                    "message": "Invalid record format - missing id field"
+                    "error": "Each record must be a dictionary containing an 'id' or 'Id' field",
+                    "message": "Invalid record format - missing id/Id field"
                 }
         
-        result = await nocodb_client.update_records(table_id, processed_records)
+        # 过滤只读字段，防止更新失败
+        filtered_records = filter_readonly_fields(processed_records)
+        
+        result = await nocodb_client.update_records(table_id, filtered_records)
         return result
     except Exception as e:
         return {
